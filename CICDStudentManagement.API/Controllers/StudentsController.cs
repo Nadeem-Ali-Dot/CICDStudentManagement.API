@@ -36,5 +36,7 @@ namespace CICDStudentManagement.API.Controllers
             var createdStudent = _studentService.Add(student);
             return CreatedAtAction(nameof(GetById), new { id = createdStudent.Id }, createdStudent);
         }
+        
+   
     }
 }
