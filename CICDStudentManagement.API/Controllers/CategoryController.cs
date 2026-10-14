@@ -9,15 +9,15 @@ namespace CICDStudentManagement.API.Controllers
     public class CategoryController : ControllerBase
     {
 
-        private readonly IStudentService _studentService;
+        private readonly IStudentService _Service;
         public CategoryController(IStudentService studentService)
         {
-            _studentService = studentService;
+            this._Service = studentService;
         }
         [HttpGet]
         public IActionResult GetAll()
         {
-            var students = _studentService.GetAll();
+            var students = _Service.GetAll();
             return Ok(students);
         }
     }
