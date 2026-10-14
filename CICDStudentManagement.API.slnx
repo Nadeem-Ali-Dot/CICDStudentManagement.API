@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CICDStudentManagement.API/CICDStudentManagement.API.csproj" />
+  <Project Path="StudentManagement.API.Tests/StudentManagement.API.Tests.csproj" />
+</Solution>
