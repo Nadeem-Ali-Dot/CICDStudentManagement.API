@@ -7,6 +7,27 @@ namespace CICDStudentManagement.API.Services
         private static readonly List<Student> Students = new()
         {
             new Student { Id = 1, Name = "Anil", Email = "anil@example.com", Course = "ASP.NET Core" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
+            new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" },
             new Student { Id = 2, Name = "Rina", Email = "rina@example.com", Course = "C#" }
         };
         public List<Student> GetAll()
