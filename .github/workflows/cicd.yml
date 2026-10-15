@@ -1,0 +1,500 @@
+# This is the display name of the workflow in GitHub Actions
+name: StudentManagement API CI-CD
+
+# Trigger section
+# This workflow will run whenever code is pushed to master
+# Example:
+#   Code push to master
+#   feature branch -> merged into master -> workflow runs
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  # ---------------------------------------------------
+  # JOB 1: CONTINUOUS INTEGRATION (CI)
+  # This job runs on GitHub's hosted Ubuntu machine
+  # Steps:
+  #   1. Download source code
+  #   2. Install .NET 8 SDK on the runner
+  #   3. Restore NuGet packages
+  #   4. Build the solution
+  #   5. Run Unit tests
+  #   6. Publish the application
+  #   7. Upload published output as artifact
+  # ---------------------------------------------------
+  ci-build-test-publish:
+    name: CI - Build, Test, and Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Download the latest repository code
+      # actions/checkout pulls your GitHub repository content
+      # into the runner machine
+      - name: Checkout source code
+        uses: actions/checkout@v5
+
+      # Step 2: Install .NET 10 SDK on the runner
+      # This is required because dotnet restore/build/test/publish
+      # commands need the .NET SDK
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # Step 3: Restore NuGet packages for the solution
+      # This downloads all package dependencies referenced
+      # by the solution/project
+      - name: Restore dependencies
+        run: dotnet restore StudentManagement.API.slnx
+
+      # Step 4: Build the solution in Release mode
+      # --configuration Release -> build optimized release version
+      # --no-restore -> do not restore again because already done above
+      - name: Build solution
+        run: dotnet build StudentManagement.API.slnx --configuration Release --no-restore
+
+      # Step 5: Run tests in Release mode
+      # --no-build -> do not build again because build already happened
+      # --verbosity normal -> show normal level test logs
+      - name: Run tests
+        run: dotnet test StudentManagement.API.slnx --configuration Release --no-build --verbosity normal
+
+      # Step 6: Publish the Web API project
+      # Publish creates deployment-ready files
+      # Output goes into ./publish folder on the runner
+      - name: Publish Web API
+        run: dotnet publish CICDStudentManagement.API/CICDStudentManagement.API.csproj --configuration Release --output ./publish --no-build
+
+
+      # Step 7: Upload the published output as an artifact
+      # Artifact = packaged files stored by GitHub Actions
+      # Later, the CD job will download this artifact
+      - name: Upload publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: studentmanagement-api-publish
+          path: ./publish
+
+  # ----------------------------------------------------------
+  # JOB 2: CONTINUOUS DEPLOYMENT (CD)
+  # This job runs on your self-hosted Windows IIS machine
+  # Steps:
+  #   1. Download published artifact
+  #   2. Prepare folders
+  #   3. Backup current live deployment
+  #   4. Stop IIS App Pool
+  #   5. Copy new files
+  #   6. Start IIS App Pool
+  #   7. Run health check
+  #   8. Run smoke test
+  #   9. Rollback if something fails
+  # ----------------------------------------------------------
+  cd-deploy-to-iis:
+    name: CD - Deploy to IIS
+
+    # needs means:
+    # Run this deployment job only after the CI job succeeds
+    # If build/test/publish fails, deployment will not run
+    needs: ci-build-test-publish
+
+    # This job should run only on your self-hosted IIS machine
+    # self-hosted -> Your own runner
+    # windows     -> Runner is Windows based
+    # iis         -> Custom label added while configuring runner
+    runs-on: [self-hosted, windows, iis]
+
+    # Development environment in GitHub
+    # This lets the workflow read environment variables like:
+    #   TEMP_PUBLISH_PATH
+    #   BACKUP_PATH
+    #   DEPLOY_PATH
+    #   IIS_APP_POOL
+    #   API_HEALTH_URL
+    #   SMOKE_TEST_URL
+    environment:
+      name: Development
+
+    steps:
+      # Step 1: Make sure all required folders exist
+      # Why needed?
+      # Because deployment will fail if these folders are missing
+      - name: Ensure deployment folders exist
+        shell: powershell
+        run: |
+          # Read folder paths from GitHub environment variables
+          # These values are configured in GitHub -> Settings -> Environments -> Development
+          $tempPath = "${{ vars.TEMP_PUBLISH_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+          $deployPath = "${{ vars.DEPLOY_PATH }}"
+
+          # If temp folder does not exist, create it
+          # TEMP_PUBLISH_PATH stores downloaded artifact files temporarily
+          if (!(Test-Path $tempPath)) {
+              New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
+          }
+
+          # If backup folder does not exist, create it
+          # BACKUP_PATH stores the previous live version for rollback
+          if (!(Test-Path $backupPath)) {
+              New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+          }
+
+          # If deployment folder does not exist, create it
+          # DEPLOY_PATH is the live IIS physical folder
+          if (!(Test-Path $deployPath)) {
+              New-Item -ItemType Directory -Path $deployPath -Force | Out-Null
+          }
+
+          Write-Host "Required folders verified successfully."
+
+      # Step 2: Download the artifact created in CI job
+      # The published files are downloaded to TEMP_PUBLISH_PATH
+      - name: Download publish artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: studentmanagement-api-publish
+          path: ${{ vars.TEMP_PUBLISH_PATH }}
+
+      # Step 3: Backup the current deployment
+      # Why?
+      # If the new deployment fails, we can restore old working files
+      - name: Backup current IIS deployment
+        shell: powershell
+        run: |
+          # Current live deployment folder
+          $source = "${{ vars.DEPLOY_PATH }}"
+
+          # Backup folder where current live version will be stored
+          $backup = "${{ vars.BACKUP_PATH }}"
+
+          Write-Host "Preparing backup..."
+
+          # Clean old backup contents first
+          # This ensures backup folder contains only the latest backup
+          if (Test-Path $backup) {
+              Get-ChildItem -Path $backup -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # If current deployment exists, backup it
+          if (Test-Path $source) {
+
+              # robocopy is a robust Windows file copy command
+              # /MIR = mirror source to destination
+              #        copies new files and removes extra files in destination
+              # /R:2 = retry 2 times on failure
+              # /W:5 = wait 5 seconds between retries
+              robocopy $source $backup /MIR /R:2 /W:5
+
+              # Store robocopy exit code in a variable
+              $exitCode = $LASTEXITCODE
+
+              # Important:
+              # Robocopy does NOT follow normal success/failure pattern
+              # 0 to 7  = acceptable/success-like results
+              # 8 or more = actual failure
+              if ($exitCode -ge 8) {
+                  throw "Backup failed. Robocopy exit code: $exitCode"
+              }
+
+              Write-Host "Backup completed successfully. Robocopy exit code: $exitCode"
+
+              # exit 0 means explicitly finish step as success
+              # This is useful because robocopy may return non-zero codes even on success
+              exit 0
+          }
+          else {
+              # First deployment case: no existing live deployment
+              Write-Host "Deployment path does not exist yet. Skipping backup."
+          }
+
+      # Step 4: Stop IIS App Pool before deployment
+      # Why stop?
+      # Because IIS may lock DLLs/files while app is running
+      - name: Stop IIS App Pool
+        shell: powershell
+        run: |
+          # Import IIS PowerShell module
+          # Without this, commands like Get-WebAppPoolState and Stop-WebAppPool won't work
+          Import-Module WebAdministration
+
+          # Read app pool name from GitHub variable
+          $appPool = "${{ vars.IIS_APP_POOL }}"
+
+          # Check current state of app pool
+          # Value can be Started, Stopped, etc.
+          $state = (Get-WebAppPoolState -Name $appPool).Value
+
+          # Stop only if not already stopped
+          if ($state -ne "Stopped") {
+              Stop-WebAppPool -Name $appPool
+              Write-Host "IIS App Pool stopped successfully."
+          }
+          else {
+              Write-Host "IIS App Pool is already stopped."
+          }
+
+      # Step 5: Wait a few seconds after stopping app pool
+      # Why wait?
+      # To give IIS time to fully release files and locks
+      - name: Wait after stopping app pool
+        shell: powershell
+        run: Start-Sleep -Seconds 5
+
+      # Step 6: Confirm artifact is really present
+      # Why needed?
+      # If artifact download failed or folder is empty,
+      # deployment should stop immediately
+      - name: Clean deployment temp folder check
+        shell: powershell
+        run: |
+          # Temp folder where artifact was downloaded
+          $source = "${{ vars.TEMP_PUBLISH_PATH }}"
+
+          # Ensure temp path exists
+          if (!(Test-Path $source)) {
+              throw "Temp publish path does not exist: $source"
+          }
+
+          # Get files from temp folder
+          $files = Get-ChildItem -Path $source -Force -ErrorAction SilentlyContinue
+
+          # If folder is empty, deployment should not continue
+          if ($null -eq $files -or $files.Count -eq 0) {
+              throw "Temp publish path is empty. Deployment artifact was not downloaded correctly."
+          }
+
+          Write-Host "Publish artifact is available for deployment."
+
+      # Step 7: Deploy the new published files
+      # This is the actual file copy from temp folder to live IIS folder
+      - name: Deploy published files to IIS folder
+        shell: powershell
+        run: |
+          # Source = temp folder containing published files downloaded from artifact
+          $source = "${{ vars.TEMP_PUBLISH_PATH }}"
+
+          # Destination = actual IIS live deployment folder
+          $destination = "${{ vars.DEPLOY_PATH }}"
+
+          # Create destination folder if it does not exist
+          if (!(Test-Path $destination)) {
+              New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          }
+
+          # Copy files from temp folder to IIS live folder
+          robocopy $source $destination /MIR /R:2 /W:5
+
+          # Capture robocopy exit code
+          $exitCode = $LASTEXITCODE
+
+          # Only fail when exit code is 8 or above
+          if ($exitCode -ge 8) {
+              throw "Deployment failed during file copy. Robocopy exit code: $exitCode"
+          }
+
+          Write-Host "Deployment copy completed successfully. Robocopy exit code: $exitCode"
+
+          # Mark step successful explicitly
+          exit 0
+
+      # Step 8: Start IIS App Pool again after deployment
+      # This makes IIS serve the newly deployed version
+      - name: Start IIS App Pool
+        shell: powershell
+        run: |
+          # Load IIS PowerShell module
+          Import-Module WebAdministration
+
+          # Read app pool name
+          $appPool = "${{ vars.IIS_APP_POOL }}"
+
+          # Check current app pool state
+          $state = (Get-WebAppPoolState -Name $appPool).Value
+
+          # Start only if not already started
+          if ($state -ne "Started") {
+              Start-WebAppPool -Name $appPool
+              Write-Host "IIS App Pool started successfully."
+          }
+          else {
+              Write-Host "IIS App Pool is already started."
+          }
+
+      # Step 9: Wait for app startup
+      # Why?
+      # After app pool starts, app still needs some time to boot
+      - name: Wait for application startup
+        shell: powershell
+        run: Start-Sleep -Seconds 10
+
+      # Step 10: Health check
+      # Purpose:
+      # Confirm the API is alive and responding with HTTP 200
+      - name: Run health check
+        shell: powershell
+        run: |
+          # Read health check URL from GitHub variable
+          $url = "${{ vars.API_HEALTH_URL }}"
+
+          Write-Host "Running health check: $url"
+
+          try {
+              # Invoke-WebRequest sends HTTP request
+              # -TimeoutSec 30 means wait up to 30 seconds
+              $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30
+          }
+          catch {
+              # If request itself fails, stop pipeline
+              throw "Health check request failed. Error: $($_.Exception.Message)"
+          }
+
+          # If API did not return HTTP 200, deployment should fail
+          if ($response.StatusCode -ne 200) {
+              throw "Health check failed. Status code: $($response.StatusCode)"
+          }
+
+          Write-Host "Health check passed successfully."
+
+      # Step 11: Smoke test
+      # Purpose:
+      # Confirm one actual business/API endpoint also works
+      # Health endpoint proves app is alive
+      # Smoke test proves app functionality is alive
+      - name: Run smoke test
+        shell: powershell
+        run: |
+          # Read smoke test URL from GitHub variable
+          $url = "${{ vars.SMOKE_TEST_URL }}"
+
+          Write-Host "Running smoke test: $url"
+
+          try {
+              # Invoke-RestMethod is better when expecting JSON/API data
+              $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 30
+          }
+          catch {
+              throw "Smoke test request failed. Error: $($_.Exception.Message)"
+          }
+
+          # If response is null, something is wrong
+          if ($null -eq $response) {
+              throw "Smoke test failed. No data returned."
+          }
+
+          # If API returns an array/list, make sure it has data
+          if ($response -is [System.Array]) {
+              if ($response.Count -lt 1) {
+                  throw "Smoke test failed. Response array is empty."
+              }
+          }
+
+          Write-Host "Smoke test passed successfully."
+
+      # Step 12: Rollback on failure
+      # This step runs only if any earlier step in this job fails
+      # Example failures:
+      #   - file copy fails
+      #   - health check fails
+      #   - smoke test fails
+      - name: Rollback deployment on failure
+        if: ${{ failure() }}
+        shell: powershell
+        run: |
+          # Load IIS management commands
+          Import-Module WebAdministration
+
+          # Read variables used during rollback
+          $appPool = "${{ vars.IIS_APP_POOL }}"
+          $backup = "${{ vars.BACKUP_PATH }}"
+          $destination = "${{ vars.DEPLOY_PATH }}"
+          $rollbackHealthUrl = "${{ vars.API_HEALTH_URL }}"
+
+          Write-Host "Deployment validation failed. Starting rollback..."
+
+          # Check whether backup folder exists
+          # If backup folder itself is missing, rollback cannot continue
+          if (!(Test-Path $backup)) {
+              throw "Rollback failed. Backup path does not exist: $backup"
+          }
+
+          # Get files from backup folder
+          $backupFiles = Get-ChildItem -Path $backup -Force -ErrorAction SilentlyContinue
+
+          # If backup folder is empty, rollback cannot restore anything
+          if ($null -eq $backupFiles -or $backupFiles.Count -eq 0) {
+              throw "Rollback failed. Backup folder is empty."
+          }
+
+          # Stop app pool before restoring backup files
+          $state = (Get-WebAppPoolState -Name $appPool).Value
+          if ($state -ne "Stopped") {
+              Stop-WebAppPool -Name $appPool
+              Write-Host "IIS App Pool stopped for rollback."
+          }
+          else {
+              Write-Host "IIS App Pool already stopped."
+          }
+
+          # Wait a few seconds to release file locks
+          Start-Sleep -Seconds 5
+
+          # Ensure destination folder exists before restoring files
+          if (!(Test-Path $destination)) {
+              New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          }
+
+          # Copy backup files back to live deployment folder
+          robocopy $backup $destination /MIR /R:2 /W:5
+
+          # Capture rollback robocopy exit code
+          $exitCode = $LASTEXITCODE
+
+          # Fail only if real robocopy error occurs
+          if ($exitCode -ge 8) {
+              throw "Rollback file restore failed. Robocopy exit code: $exitCode"
+          }
+
+          Write-Host "Rollback copy completed successfully. Robocopy exit code: $exitCode"
+
+          # Start app pool again after rollback
+          $state = (Get-WebAppPoolState -Name $appPool).Value
+          if ($state -ne "Started") {
+              Start-WebAppPool -Name $appPool
+              Write-Host "IIS App Pool started after rollback."
+          }
+          else {
+              Write-Host "IIS App Pool already started."
+          }
+
+          # Wait for rolled back application to start
+          Start-Sleep -Seconds 10
+
+          # Run health check again on restored version
+          try {
+              $rollbackResponse = Invoke-WebRequest -Uri $rollbackHealthUrl -UseBasicParsing -TimeoutSec 30
+          }
+          catch {
+              throw "Rollback completed, but health check request failed after rollback. Error: $($_.Exception.Message)"
+          }
+
+          # If rollback version is still unhealthy, rollback is not considered successful
+          if ($rollbackResponse.StatusCode -ne 200) {
+              throw "Rollback completed, but health check after rollback failed. Status code: $($rollbackResponse.StatusCode)"
+          }
+
+          Write-Host "Rollback completed successfully."
+
+          # Explicitly mark rollback step successful
+          exit 0
+
+      # Step 13: Mark workflow as failed after rollback
+      # Why do this?
+      # Because even if rollback succeeded, the new deployment failed
+      # So GitHub Actions should still show the workflow as failed
+      - name: Mark workflow as failed after rollback
+        if: ${{ failure() }}
+        shell: powershell
+        run: |
+          throw "Deployment failed. Rollback was executed."
