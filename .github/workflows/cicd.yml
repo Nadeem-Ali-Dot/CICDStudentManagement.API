@@ -104,7 +104,9 @@ jobs:
     # windows     -> Runner is Windows based
     # iis         -> Custom label added while configuring runner
     runs-on: [self-hosted, windows, iis]
-
+    defaults:
+      run:
+        shell: powershell -ExecutionPolicy Bypass -command ". '{0}'"
     # Development environment in GitHub
     # This lets the workflow read environment variables like:
     #   TEMP_PUBLISH_PATH
