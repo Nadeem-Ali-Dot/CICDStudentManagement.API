@@ -47,19 +47,19 @@ jobs:
       # This downloads all package dependencies referenced
       # by the solution/project
       - name: Restore dependencies
-        run: dotnet restore StudentManagement.API.slnx
+        run: dotnet restore CICDStudentManagement.API.slnx
 
       # Step 4: Build the solution in Release mode
       # --configuration Release -> build optimized release version
       # --no-restore -> do not restore again because already done above
       - name: Build solution
-        run: dotnet build StudentManagement.API.slnx --configuration Release --no-restore
+        run: dotnet build CICDStudentManagement.API.slnx --configuration Release --no-restore
 
       # Step 5: Run tests in Release mode
       # --no-build -> do not build again because build already happened
       # --verbosity normal -> show normal level test logs
       - name: Run tests
-        run: dotnet test StudentManagement.API.slnx --configuration Release --no-build --verbosity normal
+        run: dotnet test CICDStudentManagement.API.slnx --configuration Release --no-build --verbosity normal
 
       # Step 6: Publish the Web API project
       # Publish creates deployment-ready files
