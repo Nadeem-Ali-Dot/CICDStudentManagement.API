@@ -104,9 +104,11 @@ jobs:
     # windows     -> Runner is Windows based
     # iis         -> Custom label added while configuring runner
     runs-on: [self-hosted, windows, iis]
+    # Apply the execution-policy bypass to every PowerShell run step below.
+    # Do not add `shell: powershell` to individual steps, because that overrides this default.
     defaults:
       run:
-        shell: powershell -ExecutionPolicy Bypass -command ". '{0}'"
+        shell: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
     # Development environment in GitHub
     # This lets the workflow read environment variables like:
     #   TEMP_PUBLISH_PATH
@@ -123,7 +125,6 @@ jobs:
       # Why needed?
       # Because deployment will fail if these folders are missing
       - name: Ensure deployment folders exist
-        shell: powershell
         run: |
           # Read folder paths from GitHub environment variables
           # These values are configured in GitHub -> Settings -> Environments -> Development
@@ -163,7 +164,6 @@ jobs:
       # Why?
       # If the new deployment fails, we can restore old working files
       - name: Backup current IIS deployment
-        shell: powershell
         run: |
           # Current live deployment folder
           $source = "${{ vars.DEPLOY_PATH }}"
@@ -215,7 +215,6 @@ jobs:
       # Why stop?
       # Because IIS may lock DLLs/files while app is running
       - name: Stop IIS App Pool
-        shell: powershell
         run: |
           # Import IIS PowerShell module
           # Without this, commands like Get-WebAppPoolState and Stop-WebAppPool won't work
@@ -241,7 +240,6 @@ jobs:
       # Why wait?
       # To give IIS time to fully release files and locks
       - name: Wait after stopping app pool
-        shell: powershell
         run: Start-Sleep -Seconds 5
 
       # Step 6: Confirm artifact is really present
@@ -249,7 +247,6 @@ jobs:
       # If artifact download failed or folder is empty,
       # deployment should stop immediately
       - name: Clean deployment temp folder check
-        shell: powershell
         run: |
           # Temp folder where artifact was downloaded
           $source = "${{ vars.TEMP_PUBLISH_PATH }}"
@@ -272,7 +269,6 @@ jobs:
       # Step 7: Deploy the new published files
       # This is the actual file copy from temp folder to live IIS folder
       - name: Deploy published files to IIS folder
-        shell: powershell
         run: |
           # Source = temp folder containing published files downloaded from artifact
           $source = "${{ vars.TEMP_PUBLISH_PATH }}"
@@ -304,7 +300,6 @@ jobs:
       # Step 8: Start IIS App Pool again after deployment
       # This makes IIS serve the newly deployed version
       - name: Start IIS App Pool
-        shell: powershell
         run: |
           # Load IIS PowerShell module
           Import-Module WebAdministration
@@ -328,14 +323,12 @@ jobs:
       # Why?
       # After app pool starts, app still needs some time to boot
       - name: Wait for application startup
-        shell: powershell
         run: Start-Sleep -Seconds 10
 
       # Step 10: Health check
       # Purpose:
       # Confirm the API is alive and responding with HTTP 200
       - name: Run health check
-        shell: powershell
         run: |
           # Read health check URL from GitHub variable
           $url = "${{ vars.API_HEALTH_URL }}"
@@ -365,7 +358,6 @@ jobs:
       # Health endpoint proves app is alive
       # Smoke test proves app functionality is alive
       - name: Run smoke test
-        shell: powershell
         run: |
           # Read smoke test URL from GitHub variable
           $url = "${{ vars.SMOKE_TEST_URL }}"
@@ -402,7 +394,6 @@ jobs:
       #   - smoke test fails
       - name: Rollback deployment on failure
         if: ${{ failure() }}
-        shell: powershell
         run: |
           # Load IIS management commands
           Import-Module WebAdministration
@@ -497,6 +488,5 @@ jobs:
       # So GitHub Actions should still show the workflow as failed
       - name: Mark workflow as failed after rollback
         if: ${{ failure() }}
-        shell: powershell
         run: |
           throw "Deployment failed. Rollback was executed."
