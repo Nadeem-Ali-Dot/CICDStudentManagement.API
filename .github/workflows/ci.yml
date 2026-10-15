@@ -76,9 +76,11 @@ jobs:
       - name: Run tests
         run: dotnet test CICDStudentManagement.API.slnx --configuration Release --no-build --verbosity normal
 
+    
       # Step 10: Publish the API project
       - name: Publish Web API
         run: dotnet publish CICDStudentManagement.API/StudentManagement.API.csproj --configuration Release --output ./publish --no-build
+
 
       # Step 11: Store the publish output as an artifact
       - name: Upload publish artifact
